@@ -66,7 +66,6 @@ def add_book():
             conn.commit()
             conn.close()
             st.success("Book added successfully!")
-            st.experimental_rerun() 
         else:
             st.error("Please fill in all fields.")
 
