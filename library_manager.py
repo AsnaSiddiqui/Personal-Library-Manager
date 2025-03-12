@@ -1,9 +1,9 @@
 import streamlit as st
 import os
-import json
+import sqlite3
 
-# File to store the library data
-LIBRARY_FILE = "library.json"
+# Database file
+DB_FILE = "library.db"
 COVER_DIR = "covers"
 DEFAULT_COVER = {
     "Fiction": "default_fiction.jpg",
@@ -18,21 +18,26 @@ DEFAULT_COVER = {
 if not os.path.exists(COVER_DIR):
     os.makedirs(COVER_DIR)
 
-# Function to load the library from a file
-def load_library():
-    if os.path.exists(LIBRARY_FILE):
-        with open(LIBRARY_FILE, "r") as file:
-            return json.load(file)
-    return []
-
-# Function to save the library to a file
-def save_library(library):
-    with open(LIBRARY_FILE, "w") as file:
-        json.dump(library, file, indent=4)
+# Initialize database
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS books (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        author TEXT NOT NULL,
+        year INTEGER,
+        genre TEXT,
+        read_status BOOLEAN,
+        rating INTEGER,
+        favorite BOOLEAN,
+        cover_image TEXT
+    )''')
+    conn.commit()
+    conn.close()
 
 # Function to add a book
-def add_book(library):
-    st.title("Personal Library Manager ")
+def add_book():
     st.subheader("Add a Book")
     title = st.text_input("Title")
     author = st.text_input("Author")
@@ -52,84 +57,89 @@ def add_book(library):
                     f.write(cover_image.getbuffer())
             else:
                 cover_filename = os.path.join(COVER_DIR, DEFAULT_COVER.get(genre, DEFAULT_COVER["Other"]))
-
-            book = {
-                "title": title,
-                "author": author,
-                "year": year,
-                "genre": genre,
-                "read_status": read_status == "Yes",
-                "rating": rating,
-                "favorite": favorite,
-                "cover_image": cover_filename
-            }
-            library.append(book)
-            save_library(library)
+            
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO books (title, author, year, genre, read_status, rating, favorite, cover_image) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                           (title, author, year, genre, read_status == "Yes", rating, favorite, cover_filename))
+            conn.commit()
+            conn.close()
             st.success("Book added successfully!")
         else:
             st.error("Please fill in all fields.")
 
 # Function to remove a book
-def remove_book(library):
+def remove_book():
     st.subheader("Remove a Book")
-    if library:
-        titles = [book["title"] for book in library]
-        title_to_remove = st.selectbox("Select a book to remove", titles)
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title FROM books")
+    books = cursor.fetchall()
+    conn.close()
+    
+    if books:
+        titles = {str(book[0]) + " - " + book[1]: book[0] for book in books}
+        selected_book = st.selectbox("Select a book to remove", list(titles.keys()))
         if st.button("Remove Book"):
-            library[:] = [book for book in library if book["title"] != title_to_remove]
-            save_library(library)
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM books WHERE id = ?", (titles[selected_book],))
+            conn.commit()
+            conn.close()
             st.success("Book removed successfully!")
     else:
         st.warning("Your library is empty.")
 
 # Function to search for a book
-def search_book(library):
+def search_book():
     st.subheader("Search for a Book")
     search_by = st.radio("Search by", ["Title", "Author", "Genre"])
     search_term = st.text_input(f"Enter the {search_by.lower()}")
     if st.button("Search"):
-        if search_term:
-            matching_books = [book for book in library if search_term.lower() in book[search_by.lower()].lower()]
-            if matching_books:
-                st.write("Matching Books:")
-                for book in matching_books:
-                    status = "Read" if book["read_status"] else "Unread"
-                    favorite = " (Favorite)" if book.get("favorite") else ""
-                    if os.path.exists(book["cover_image"]):
-                        st.image(book["cover_image"], width=100)
-                    st.write(f"- {book['title']} by {book['author']} ({book['year']}) - {book['genre']} - {status} - Rating: {book['rating']}{favorite}")
-            else:
-                st.warning("No matching books found.")
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        query = f"SELECT * FROM books WHERE {search_by.lower()} LIKE ?"
+        cursor.execute(query, (f"%{search_term}%",))
+        books = cursor.fetchall()
+        conn.close()
+        
+        if books:
+            st.write("Matching Books:")
+            for book in books:
+                st.write(f"- {book[1]} by {book[2]} ({book[3]}) - {book[4]} - {'Read' if book[5] else 'Unread'} - Rating: {book[6]} {'(Favorite)' if book[7] else ''}")
         else:
-            st.error("Please enter a search term.")
+            st.warning("No matching books found.")
 
 # Function to display all books
-def display_books(library):
+def display_books():
     st.subheader("Your Library")
-    if library:
-        for i, book in enumerate(library, 1):
-            status = "Read" if book["read_status"] else "Unread"
-            favorite = " (Favorite)" if book.get("favorite") else ""
-            if os.path.exists(book["cover_image"]):
-                st.image(book["cover_image"], width=100)
-            st.write(f"{i}. {book['title']} by {book['author']} ({book['year']}) - {book['genre']} - {status} - Rating: {book['rating']}{favorite}")
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM books")
+    books = cursor.fetchall()
+    conn.close()
+    
+    if books:
+        for i, book in enumerate(books, 1):
+            st.write(f"{i}. {book[1]} by {book[2]} ({book[3]}) - {book[4]} - {'Read' if book[5] else 'Unread'} - Rating: {book[6]} {'(Favorite)' if book[7] else ''}")
     else:
         st.warning("Your library is empty.")
 
 # Function to display statistics
-def display_statistics(library):
+def display_statistics():
     st.subheader("Library Statistics")
-    total_books = len(library)
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*), SUM(read_status), SUM(favorite) FROM books")
+    total_books, read_books, favorite_books = cursor.fetchone()
+    conn.close()
+    
     if total_books == 0:
         st.warning("No books in the library.")
         return
-
-    read_books = sum(book["read_status"] for book in library)
-    favorite_books = sum(1 for book in library if book.get("favorite"))
-    percentage_read = (read_books / total_books) * 100
     
     st.write(f"Total books: {total_books}")
-    st.write(f"Books read: {read_books} ({percentage_read:.1f}%)")
+    st.write(f"Books read: {read_books} ({(read_books/total_books)*100:.1f}% if total_books else 0%)")
     st.write(f"Favorite books: {favorite_books}")
 
 # Sidebar enhancements
@@ -141,20 +151,20 @@ st.sidebar.markdown("**Features:**\n- Add and remove books\n- Search books by ti
 
 # Main function
 def main():
-    library = load_library()
+    init_db()
     menu = ["Add a Book", "Remove a Book", "Search for a Book", "Display All Books", "Display Statistics"]
     choice = st.sidebar.selectbox("Menu", menu)
 
     if choice == "Add a Book":
-        add_book(library)
+        add_book()
     elif choice == "Remove a Book":
-        remove_book(library)
+        remove_book()
     elif choice == "Search for a Book":
-        search_book(library)
+        search_book()
     elif choice == "Display All Books":
-        display_books(library)
+        display_books()
     elif choice == "Display Statistics":
-        display_statistics(library)
+        display_statistics()
 
 if __name__ == "__main__":
     main()
