@@ -38,6 +38,7 @@ def init_db():
 
 # Function to add a book
 def add_book():
+    st.title("Personal Library Manager")
     st.subheader("Add a Book")
     title = st.text_input("Title")
     author = st.text_input("Author")
